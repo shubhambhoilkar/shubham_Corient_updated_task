@@ -1,0 +1,48 @@
+version: "3.9"
+
+# Reuses your .env for shared config (SCRAPE_*, EMI_DEFAULT_ANNUAL_RATE, etc.) via env_file,
+# then overrides the handful of values that must differ for a containerized/production run:
+# FLASK_ENV is forced to "production" (so the app's own SECRET_KEY enforcement in
+# app/__init__.py actually applies -- see the comments there and in .env.example for why a
+# hardcoded fallback secret is deliberately not provided anywhere, including here), and
+# DATABASE_URL points at the bundled Postgres service instead of SQLite.
+#
+# SECRET_KEY is intentionally NOT given a literal default in this file, for the same reason
+# it isn't in .env.example: a default checked into a compose file is a default every clone of
+# this repo shares. The ${SECRET_KEY:?...} syntax below makes `docker compose up` refuse to
+# start at all if you haven't set one -- put a real value in your own `.env` first:
+#   python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      - FLASK_ENV=production
+      - DATABASE_URL=postgresql+psycopg2://epi_user:epi_pass@db:5432/epi
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in your .env before running docker compose. Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=epi_user
+      - POSTGRES_PASSWORD=epi_pass
+      - POSTGRES_DB=epi
+    volumes:
+      - epi_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U epi_user -d epi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  epi_pgdata:
